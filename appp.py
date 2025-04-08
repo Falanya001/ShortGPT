@@ -10,6 +10,21 @@ import astor
 print("[INFO] Forcing installation of gradio==5.12.0 and gradio_client==1.5.4...")
 os.system("pip install --upgrade --force-reinstall gradio==5.12.0 gradio_client==1.5.4")
 
+# Patch gradio_client's get_type function to handle booleans
+import gradio_client.utils as client_utils
+
+_original_get_type = client_utils.get_type
+
+def patched_get_type(schema):
+    # If the schema itself is a boolean, return a string "bool"
+    if isinstance(schema, bool):
+        return "bool"
+    # Otherwise, proceed as usual
+    return _original_get_type(schema)
+
+client_utils.get_type = patched_get_type
+print("[INFO] Patched gradio_client.utils.get_type to handle booleans.")
+
 # -----------------------------------------------------------
 # [1] Clone the ShortGPT repository
 # -----------------------------------------------------------
@@ -192,8 +207,10 @@ def run_shortgpt():
             server_name="0.0.0.0",
             server_port=7860,
             share=False,    # Hugging Face Spaces doesn't support share=True
-            inbrowser=False # Don't try to open a browser
-            # Note: Removed ssr argument as it's not supported
+            inbrowser=False, # Don't try to open a browser
+            enable_api=True,   # Force API endpoints to be registered
+            enable_queue=True  # Enable a request queue if needed
+            
         )
 
     app.launch = custom_launch
