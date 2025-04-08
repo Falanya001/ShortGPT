@@ -1,4 +1,17 @@
 from gui.gui_gradio import ShortGptUI
 
 app = ShortGptUI(colab=False)
-app.launch(server_name="0.0.0.0", server_port=7860, share=True)
+# Monkey patch the .launch() method to inject your own logic
+def custom_launch():
+    ui = app.create_interface()  # This builds the gr.Interface
+    ui.launch(
+        server_name="0.0.0.0",  # So it binds to all interfaces (needed on Hugging Face)
+        server_port=7860,       # Any available port on HF (can be 7860, 7861, etc.)
+        share=True              # This exposes a public URL
+    )
+
+# Replace the original method with your custom one
+app.launch = custom_launch
+
+# Call it
+app.launch()
