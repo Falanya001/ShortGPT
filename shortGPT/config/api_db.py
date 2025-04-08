@@ -17,19 +17,11 @@ class ApiKeyManager:
     def get_api_key(cls, key: str | ApiProvider):
         if isinstance(key, ApiProvider):
             key = key.value
-            
-        # Check if the key is present in the database
-        api_key = cls.api_key_doc_manager._get(key)
-        if api_key:
-            return api_key
-
-        # If not found in the database, check in the environment variables
+        # Format the key to match the environment variable naming style
         env_key = key.replace(" ", "_").upper()
-        api_key = os.environ.get(env_key)
-        if api_key:
-            return api_key
         
-        return ""
+        # Retrieve from HF Secrets via environment variable
+        return os.getenv(env_key, "")
 
     @classmethod
     def set_api_key(cls, key: str | ApiProvider, value: str):
