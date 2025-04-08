@@ -14,13 +14,12 @@ class ApiKeyManager:
     api_key_doc_manager = TinyMongoDocument("api_db", "api_keys", "key_doc", create=True)
 
     @classmethod
+    @classmethod
     def get_api_key(cls, key: str | ApiProvider):
         if isinstance(key, ApiProvider):
             key = key.value
-        # Format the key to match the environment variable naming style
         env_key = key.replace(" ", "_").upper()
-        
-        # Retrieve from HF Secrets via environment variable
+        print(f"[DEBUG] Requested API key: {env_key}")
         return os.getenv(env_key, "")
 
     @classmethod
