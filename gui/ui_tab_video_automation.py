@@ -190,7 +190,7 @@ class VideoAutomationUI(AbstractComponentUI):
     def create_ui(self):
         with gr.Row(visible=False) as self.video_automation:
             with gr.Column():
-                self.chatbot = gr.Chatbot(self.initialize_conversation, height=365)
+                self.chatbot = gr.Chatbot(self.initialize_conversation, height=365, type='messages')
                 self.msg = gr.Textbox()
                 self.restart_button = gr.Button("Restart")
                 self.video_folder = gr.Button("📁", visible=False)
