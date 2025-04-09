@@ -2,26 +2,30 @@ import json
 import os
 import re
 from time import sleep, time
-import google.generativeai as genai
+
+import openai
+import tiktoken
 import yaml
 
 from shortGPT.config.api_db import ApiKeyManager
 
 
-def num_tokens_from_messages(texts, model="gemini-1.5-pro-002"):
+def num_tokens_from_messages(texts, model="gpt-4o-mini"):
     """Returns the number of tokens used by a list of messages."""
     try:
-        # For Gemini, we'll use a simple character-based estimation
+        encoding = tiktoken.encoding_for_model(model)
+    except KeyError:
+        encoding = tiktoken.get_encoding("cl100k_base")
+    if model == "gpt-4o-mini":  # note: future models may deviate from this
         if isinstance(texts, str):
             texts = [texts]
         score = 0
         for text in texts:
-            # Rough estimation: 4 characters per token
-            score += len(str(text)) // 4
+            score += 4 + len(encoding.encode(text))
         return score
-    except Exception as e:
-        print(f"Error estimating tokens: {e}")
-        return 0
+    else:
+        raise NotImplementedError(f"""num_tokens_from_messages() is not presently implemented for model {model}.
+        See https://github.com/openai/openai-python/blob/main/chatml.md for information""")
 
 
 def extract_biggest_json(string):
@@ -51,9 +55,7 @@ def load_json_file(file_path):
         json_data = json.load(f)
     return json_data
 
-
 from pathlib import Path
-
 
 def load_local_yaml_prompt(file_path):
     _here = Path(__file__).parent
@@ -65,57 +67,53 @@ def load_local_yaml_prompt(file_path):
 def open_file(filepath):
     with open(filepath, 'r', encoding='utf-8') as infile:
         return infile.read()
-
+from openai import OpenAI
 
 def llm_completion(chat_prompt="", system="", temp=0.7, max_tokens=2000, remove_nl=True, conversation=None):
-    """Use Gemini for text generation"""
+    openai_key= ApiKeyManager.get_api_key("OPENAI_API_KEY")
     gemini_key = ApiKeyManager.get_api_key("GEMINI_API_KEY")
-    if not gemini_key:
-        raise Exception("Gemini API Key not found. Please set GEMINI_API_KEY in your environment.")
-    
-    try:
-        # Configure Gemini
-        genai.configure(api_key=gemini_key)
-        model = genai.GenerativeModel('gemini-1.5-pro-002')
-        
+    if gemini_key:
+        client = OpenAI( 
+            api_key=gemini_key,
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
+        )
+        model="gemini-2.0-flash-lite-preview-02-05"
+    elif openai_key:
+        client = OpenAI( api_key=openai_key)
+        model="gpt-4o-mini"
+    else:
+        raise Exception("No OpenAI or Gemini API Key found for LLM request")
+    max_retry = 5
+    retry = 0
+    error = ""
+    for i in range(max_retry):
         try:
             if conversation:
-                # Handle chat history
-                chat = model.start_chat(history=conversation)
-                response = chat.send_message(chat_prompt)
+                messages = conversation
             else:
-                # Combine system and user prompts
-                full_prompt = f"{system}\n\nUser Request: {chat_prompt}" if system else chat_prompt
-                generation_config = genai.types.GenerationConfig(
-                    temperature=temp,
-                    max_output_tokens=max_tokens,
+                messages = [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": chat_prompt}
+                ]
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temp,
+                timeout=30
                 )
-                response = model.generate_content(
-                    full_prompt,
-                    generation_config=generation_config
-                )
-            
-            if not response.text:
-                raise Exception("Empty response from Gemini")
-                
-            text = response.text.strip()
+            text = response.choices[0].message.content.strip()
             if remove_nl:
-                text = ' '.join(text.split())
-            
-            # Log the response
-            filename = f'{time()}_llm_completion.txt'
+                text = re.sub('\s+', ' ', text)
+            filename = '%s_llm_completion.txt' % time()
             if not os.path.exists('.logs/gpt_logs'):
                 os.makedirs('.logs/gpt_logs')
-            with open(f'.logs/gpt_logs/{filename}', 'w', encoding='utf-8') as outfile:
-                outfile.write(
-                    f"System prompt: ===\n{system}\n===\n"
-                    f"Chat prompt: ===\n{chat_prompt}\n===\n"
-                    f'RESPONSE:\n====\n{text}\n===\n'
-                )
+            with open('.logs/gpt_logs/%s' % filename, 'w', encoding='utf-8') as outfile:
+                outfile.write(f"System prompt: ===\n{system}\n===\n"+f"Chat prompt: ===\n{chat_prompt}\n===\n" + f'RESPONSE:\n====\n{text}\n===\n')
             return text
-            
-        except Exception as e:
-            raise Exception(f"Error with Gemini API: {str(e)}")
-            
-    except Exception as e:
-        raise Exception(f"Failed to initialize Gemini: {str(e)}")
+        except Exception as oops:
+            retry += 1
+            print('Error communicating with OpenAI:', oops)
+            error = str(oops)
+            sleep(1)
+    raise Exception(f"Error communicating with LLM Endpoint Completion errored more than error: {error}")g
