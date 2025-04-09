@@ -2,31 +2,26 @@ import json
 import os
 import re
 from time import sleep, time
-
-import tiktoken
-import yaml
 import google.generativeai as genai
-from openai import OpenAI
+import yaml
 
 from shortGPT.config.api_db import ApiKeyManager
 
 
-def num_tokens_from_messages(texts, model="gpt-4o-mini"):
+def num_tokens_from_messages(texts, model="gemini-1.5-pro-002"):
     """Returns the number of tokens used by a list of messages."""
     try:
-        encoding = tiktoken.encoding_for_model(model)
-    except KeyError:
-        encoding = tiktoken.get_encoding("cl100k_base")
-    if model == "gpt-4o-mini":  # note: future models may deviate from this
+        # For Gemini, we'll use a simple character-based estimation
         if isinstance(texts, str):
             texts = [texts]
         score = 0
         for text in texts:
-            score += 4 + len(encoding.encode(text))
+            # Rough estimation: 4 characters per token
+            score += len(str(text)) // 4
         return score
-    else:
-        raise NotImplementedError(f"""num_tokens_from_messages() is not presently implemented for model {model}.
-        See https://github.com/openai/openai-python/blob/main/chatml.md for information""")
+    except Exception as e:
+        print(f"Error estimating tokens: {e}")
+        return 0
 
 
 def extract_biggest_json(string):
@@ -73,75 +68,54 @@ def open_file(filepath):
 
 
 def llm_completion(chat_prompt="", system="", temp=0.7, max_tokens=2000, remove_nl=True, conversation=None):
-    openai_key = ApiKeyManager.get_api_key("OPENAI_API_KEY")
+    """Use Gemini for text generation"""
     gemini_key = ApiKeyManager.get_api_key("GEMINI_API_KEY")
-
-    if gemini_key and not openai_key:
-        # Use Google's Gemini API directly
+    if not gemini_key:
+        raise Exception("Gemini API Key not found. Please set GEMINI_API_KEY in your environment.")
+    
+    try:
+        # Configure Gemini
         genai.configure(api_key=gemini_key)
-        model = genai.GenerativeModel('gemini-pro')
-
+        model = genai.GenerativeModel('gemini-1.5-pro-002')
+        
         try:
             if conversation:
+                # Handle chat history
                 chat = model.start_chat(history=conversation)
                 response = chat.send_message(chat_prompt)
             else:
-                # Combine system and user prompts for Gemini
-                full_prompt = f"{system}\n\n{chat_prompt}" if system else chat_prompt
-                response = model.generate_content(full_prompt, temperature=temp)
-
+                # Combine system and user prompts
+                full_prompt = f"{system}\n\nUser Request: {chat_prompt}" if system else chat_prompt
+                generation_config = genai.types.GenerationConfig(
+                    temperature=temp,
+                    max_output_tokens=max_tokens,
+                )
+                response = model.generate_content(
+                    full_prompt,
+                    generation_config=generation_config
+                )
+            
+            if not response.text:
+                raise Exception("Empty response from Gemini")
+                
             text = response.text.strip()
             if remove_nl:
-                text = re.sub('\s+', ' ', text)
-
+                text = ' '.join(text.split())
+            
             # Log the response
-            filename = '%s_llm_completion.txt' % time()
+            filename = f'{time()}_llm_completion.txt'
             if not os.path.exists('.logs/gpt_logs'):
                 os.makedirs('.logs/gpt_logs')
-            with open('.logs/gpt_logs/%s' % filename, 'w', encoding='utf-8') as outfile:
-                outfile.write(f"System prompt: ===\n{system}\n===\n" + f"Chat prompt: ===\n{chat_prompt}\n===\n" + f'RESPONSE:\n====\n{text}\n===\n')
+            with open(f'.logs/gpt_logs/{filename}', 'w', encoding='utf-8') as outfile:
+                outfile.write(
+                    f"System prompt: ===\n{system}\n===\n"
+                    f"Chat prompt: ===\n{chat_prompt}\n===\n"
+                    f'RESPONSE:\n====\n{text}\n===\n'
+                )
             return text
-
+            
         except Exception as e:
             raise Exception(f"Error with Gemini API: {str(e)}")
-
-    elif openai_key:
-        client = OpenAI(api_key=openai_key)
-        model = "gpt-4o-mini"
-        max_retry = 5
-        retry = 0
-        error = ""
-
-        for i in range(max_retry):
-            try:
-                if conversation:
-                    messages = conversation
-                else:
-                    messages = [
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": chat_prompt}
-                    ]
-                response = client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    max_tokens=max_tokens,
-                    temperature=temp,
-                    timeout=30
-                )
-                text = response.choices[0].message.content.strip()
-                if remove_nl:
-                    text = re.sub('\s+', ' ', text)
-                filename = '%s_llm_completion.txt' % time()
-                if not os.path.exists('.logs/gpt_logs'):
-                    os.makedirs('.logs/gpt_logs')
-                with open('.logs/gpt_logs/%s' % filename, 'w', encoding='utf-8') as outfile:
-                    outfile.write(f"System prompt: ===\n{system}\n===\n" + f"Chat prompt: ===\n{chat_prompt}\n===\n" + f'RESPONSE:\n====\n{text}\n===\n')
-                return text
-            except Exception as oops:
-                retry += 1
-                print('Error communicating with OpenAI:', oops)
-                error = str(oops)
-                sleep(1)
-        raise Exception(f"Error communicating with OpenAI: {error}")
-    else:
-        raise Exception("No OpenAI or Gemini API Key found for LLM request")
+            
+    except Exception as e:
+        raise Exception(f"Failed to initialize Gemini: {str(e)}")
