@@ -73,13 +73,21 @@ def llm_completion(chat_prompt="", system="", temp=0.7, max_tokens=2000, remove_
     openai_key= ApiKeyManager.get_api_key("OPENAI_API_KEY")
     gemini_key = ApiKeyManager.get_api_key("GEMINI_API_KEY")
     if gemini_key:
-        client = OpenAI( 
-            api_key=gemini_key,
-            base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
-        )
-        model="gemini-2.0-flash-lite-preview-02-05"
+        try:
+            client = OpenAI(
+                api_key=gemini_key,
+                base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
+            )
+            model="gemini-2.0-flash-lite-preview-02-05"
+        except Exception as e:
+            print(f"Failed to initialize Gemini client: {e}")
+            if openai_key:
+                client = OpenAI(api_key=openai_key)
+                model="gpt-4o-mini"
+            else:
+                raise Exception("No valid API keys found")
     elif openai_key:
-        client = OpenAI( api_key=openai_key)
+        client = OpenAI(api_key=openai_key)
         model="gpt-4o-mini"
     else:
         raise Exception("No OpenAI or Gemini API Key found for LLM request")
@@ -99,8 +107,7 @@ def llm_completion(chat_prompt="", system="", temp=0.7, max_tokens=2000, remove_
                 model=model,
                 messages=messages,
                 max_tokens=max_tokens,
-                temperature=temp,
-                timeout=30
+                temperature=temp
                 )
             text = response.choices[0].message.content.strip()
             if remove_nl:
@@ -116,4 +123,4 @@ def llm_completion(chat_prompt="", system="", temp=0.7, max_tokens=2000, remove_
             print('Error communicating with OpenAI:', oops)
             error = str(oops)
             sleep(1)
-    raise Exception(f"Error communicating with LLM Endpoint Completion errored more than error: {error}")g
+    raise Exception(f"Error communicating with LLM Endpoint Completion errored more than error: {error}")
